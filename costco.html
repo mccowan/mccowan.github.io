@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CostcoSplitter — Receipt Parser & Cost Splitter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f8fafc; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen antialiased flex flex-col font-sans selection:bg-red-500 selection:text-white">
+
+  <!-- Navigation Bar -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs backdrop-blur-md bg-white/95">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5 cursor-pointer" onclick="goToEntryScreen()">
+        <span class="text-xl">🛒</span>
+        <span class="font-extrabold text-base tracking-tight">Costco<span class="text-red-600">Splitter</span></span>
+      </div>
+
+      <!-- Action Buttons (Shown when a receipt is active) -->
+      <div id="headerActions" class="hidden items-center space-x-2">
+        <button onclick="shareLink()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-all active:scale-95 flex items-center space-x-1.5" title="Copy shareable link">
+          <span>🔗</span>
+          <span>Share</span>
+        </button>
+        <button onclick="copySplitSummary()" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-all active:scale-95 flex items-center space-x-1.5">
+          <span>📋</span>
+          <span>Copy Summary</span>
+        </button>
+        <button onclick="goToEntryScreen()" class="px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 text-xs font-medium transition-all" title="Start new receipt">
+          New
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- SCREEN 1: Receipt Entry (Shown when no receipt loaded) -->
+  <main id="entryScreen" class="max-w-2xl mx-auto px-4 py-12 flex-1 w-full flex flex-col justify-center">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+      <div class="text-center space-y-1.5">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-red-50 text-red-600 text-2xl mb-1 shadow-inner">
+          🧾
+        </div>
+        <h1 class="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Split a Costco Receipt</h1>
+        <p class="text-xs sm:text-sm text-slate-500">Paste text from a photo OCR scan or digital PDF receipt</p>
+      </div>
+
+      <div class="space-y-3">
+        <textarea id="receiptInput" rows="7" placeholder="Paste raw receipt text here..." class="w-full rounded-xl border border-slate-300 p-3.5 text-xs sm:text-sm font-mono text-slate-800 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all resize-y shadow-inner"></textarea>
+
+        <p class="text-[11px] text-slate-400 text-center">
+          💡 <span class="font-medium text-slate-600">Costco App Tip:</span> Go to <span class="text-slate-600 font-semibold">Orders & Purchases → In-Warehouse → View Receipt → Copy Text</span>
+        </p>
+
+        <!-- Quick Samples & Parse Action -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
+          <div class="flex items-center space-x-2">
+            <span class="text-xs text-slate-400 font-medium">Try:</span>
+            <button onclick="loadSampleAndParse(1)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all">
+              Sample 1
+            </button>
+            <button onclick="loadSampleAndParse(2)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all">
+              Sample 2
+            </button>
+          </div>
+
+          <button id="parseBtn" onclick="parseAndLaunch()" class="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-md shadow-red-600/20 transition-all flex items-center justify-center space-x-2">
+            <span>Parse & Split Receipt</span>
+            <span>→</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- SCREEN 2: Active Splitting Workspace (Shown when receipt loaded) -->
+  <main id="splitScreen" class="hidden max-w-6xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full space-y-5">
+
+    <!-- Unified Sticky Control HUD (Status + Participants with Live Running Tabs) -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3.5">
+      <!-- Top Row: Totals & Reconciliation Status -->
+      <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center space-x-2.5">
+          <div id="statusBadge" class="flex items-center space-x-1 font-bold px-2 py-0.5 rounded-lg"></div>
+          <div class="text-slate-600">
+            Receipt: <span id="summaryTotalText" class="font-mono font-bold text-slate-900 text-sm">$0.00</span>
+            <span class="text-slate-400 text-[11px]">(Tax: <span id="summaryTaxText">$0.00</span>)</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2 font-mono text-xs">
+          <span class="text-slate-400">Assigned:</span>
+          <span id="allocationAmount" class="font-bold text-slate-900">$0.00</span>
+          <span id="allocationBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold"></span>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-slate-100"></div>
+
+      <!-- Bottom Row: Participants with Live Running Tabs -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+        <div id="participantsList" class="flex flex-wrap items-center gap-2">
+          <!-- Populated dynamically with live tabs: 🦫 Alex · $42.50 -->
+        </div>
+
+        <button id="addParticipantBtn" onclick="addParticipant()" class="px-3 py-1 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-all active:scale-95 flex items-center space-x-1">
+          <span>+</span>
+          <span>Friend</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Items Section -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <!-- Header Toolbar -->
+      <div class="p-3.5 sm:p-4 border-b border-slate-100 flex items-center justify-between gap-2">
+        <div class="flex items-center space-x-2">
+          <span class="font-bold text-sm text-slate-900">Items (<span id="itemCountDisplay">0</span>)</span>
+        </div>
+        <div class="flex items-center space-x-2 text-xs">
+          <button onclick="splitAllEvenly()" class="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-600 font-semibold transition-all" title="Split all items among all friends">
+            Split All
+          </button>
+          <button onclick="resetAllAssignments()" class="px-2.5 py-1 rounded-lg hover:bg-slate-100 text-slate-600 font-semibold transition-all" title="Reset assignments">
+            Reset
+          </button>
+          <button onclick="openAddItemModal()" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold transition-all" title="Add manual line item">
+            + Item
+          </button>
+        </div>
+      </div>
+
+      <!-- Desktop Table View (≥ md) -->
+      <div class="hidden md:block overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-100 bg-slate-50/50 text-slate-600 font-bold uppercase text-[10px] tracking-wider">
+              <th class="py-2.5 px-4 w-10 text-center">#</th>
+              <th class="py-2.5 px-4 min-w-[220px]">Item Description</th>
+              <th class="py-2.5 px-4 w-28 text-right">Net Price</th>
+              <th class="py-2.5 px-4 w-20 text-center">Tax</th>
+              <th class="py-2.5 px-4 min-w-[240px]">Split With</th>
+              <th class="py-2.5 px-4 w-24 text-center">Halfsies</th>
+              <th class="py-2.5 px-4 w-10 text-center"></th>
+            </tr>
+          </thead>
+          <tbody id="itemsTableBody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+
+      <!-- Mobile Touch Cards View (< md) -->
+      <div id="itemsMobileContainer" class="block md:hidden divide-y divide-slate-100 p-2 space-y-2">
+        <!-- Populated dynamically with touch-ergonomic cards -->
+      </div>
+    </div>
+
+    <!-- Participant Breakdown Cards -->
+    <div class="space-y-3">
+      <h2 class="font-bold text-sm text-slate-900">Individual Shares</h2>
+      <div id="participantCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"></div>
+    </div>
+
+  </main>
+
+  <!-- Halfsies Modal (for 3+ participants) -->
+  <div id="halfsiesModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in duration-150">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-sm text-slate-900">½ Halfsies (Pick 2 People)</h3>
+        <button onclick="closeHalfsiesModal()" class="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 text-xs">✕</button>
+      </div>
+
+      <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1">
+        <div class="font-bold text-slate-900 truncate" id="halfsiesItemName"></div>
+        <div class="flex justify-between text-slate-600">
+          <span>Net Price: <span id="halfsiesItemPrice" class="font-mono font-bold text-slate-900"></span></span>
+          <span id="halfsiesPerPerson" class="font-mono font-bold text-indigo-700"></span>
+        </div>
+      </div>
+
+      <div id="halfsiesPickerList" class="space-y-1.5 max-h-56 overflow-y-auto"></div>
+
+      <div class="flex items-center justify-end space-x-2 pt-1">
+        <button onclick="closeHalfsiesModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100">Cancel</button>
+        <button id="confirmHalfsiesBtn" onclick="applyHalfsiesSelection()" disabled class="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Item Modal -->
+  <div id="addItemModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-sm text-slate-900">Add Line Item</h3>
+        <button onclick="closeAddItemModal()" class="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 text-xs">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-medium text-slate-600 mb-1">Description</label>
+          <input type="text" id="manualDesc" placeholder="e.g. ROTISSERIE CHICKEN" class="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">Price ($)</label>
+            <input type="number" step="0.01" id="manualPrice" placeholder="4.99" class="w-full rounded-lg border border-slate-300 p-2 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">Tax</label>
+            <select id="manualTax" class="w-full rounded-lg border border-slate-300 p-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="N">No Tax</option>
+              <option value="Y">Taxable</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-1">
+        <button onclick="closeAddItemModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100">Cancel</button>
+        <button onclick="saveManualItem()" class="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-all">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium flex items-center space-x-2 animate-in fade-in slide-in-from-bottom duration-150">
+    <span id="toastIcon">✓</span>
+    <span id="toastMessage"></span>
+  </div>
+
+  <!-- Core Application Script -->
+  <script>
+    // --- SAMPLE FIXTURES ---
+    const SAMPLES = {
+      1: `EVERETT MA #333
+2 MYSTIC VIEW RD
+EVERETT, MA 02149
+21033320602102609201732
+Member 1118333683333603484CREAMI XL199.99 YE951691TIKKA MASALA15.99 NE1782177KS CHKN FILL13.49 NE1451835ANDOUILLE SG15.39 N388487/ 14518354.00-E1530604DRGNFRT BLND7.89 NE1048072GREEK YOGURT7.49 NE37463CARAMEL FLAN14.99 NE1984999KS RICE CRAC10.49 NE5623BROCCOLI6.39 NSUBTOTAL288.11TAX12.50****Total300.61XXXXXXXXXXXXX6542CHIP readAPPROVED - PURCHASEAMOUNT: $300.6109/20/202617:32333206210706VISA300.61Change0(A) A12.50TOTAL TAX12.50TOTAL NUMBER OF ITEMS SOLD = 9INSTANT SAVINGS$4.0009/20/202617:32 333206210706`,
+      2: `EVERETT MA #333
+2 MYSTIC VIEW RD
+EVERETT, MA 02149
+21033320202412609061750
+Member 111833368333E47492CELERY SALAD13.57 NE123614GREEN ONIONS6.39 NE1975527KSULTFILTMLK11.59 NE1738408KS FR 2DZ5.29 N141057112.9QT 4PK9.99 Y389589/14105713.00-E1407686LC SOFT TACO6.99 NE19813MUSHROOMS5.49 NE38175CARA ORANGES6.59 N2 @ 14.971796292HOODED BLNKT29.94 YSUBTOTAL92.84TAX2.31****Total95.15XXXXXXXXXXXXX6542CHIP readAPPROVED - PURCHASEAMOUNT: $95.1509/06/202617:50333202241702VISA95.15Change0(A) A2.31TOTAL TAX2.31TOTAL NUMBER OF ITEMS SOLD = 10INSTANT SAVINGS$3.0009/06/202617:50 333202241702`
+    };
+
+    // --- ANIMAL AVATARS (Google Docs Style) ---
+    const ANIMAL_POOL = [
+      { id: 'beaver', emoji: '🦫', defaultName: 'Beaver', bg: 'bg-amber-100', text: 'text-amber-800', border: 'border-amber-300' },
+      { id: 'otter', emoji: '🦦', defaultName: 'Otter', bg: 'bg-teal-100', text: 'text-teal-800', border: 'border-teal-300' },
+      { id: 'raccoon', emoji: '🦝', defaultName: 'Raccoon', bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300' },
+      { id: 'fox', emoji: '🦊', defaultName: 'Fox', bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
+      { id: 'duck', emoji: '🦆', defaultName: 'Duck', bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
+      { id: 'sloth', emoji: '🦥', defaultName: 'Sloth', bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300' },
+      { id: 'hedgehog', emoji: '🦔', defaultName: 'Hedgehog', bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-300' },
+      { id: 'panda', emoji: '🐼', defaultName: 'Panda', bg: 'bg-cyan-100', text: 'text-cyan-800', border: 'border-cyan-300' }
+    ];
+
+    // --- APP STATE ---
+    let state = {
+      hasReceipt: false,
+      participants: [
+        { ...ANIMAL_POOL[0], name: ANIMAL_POOL[0].defaultName },
+        { ...ANIMAL_POOL[1], name: ANIMAL_POOL[1].defaultName }
+      ],
+      items: [],
+      totals: { subtotal: 0, tax: 0, total: 0, verified: false },
+      currentHalfsiesIndex: null,
+      editingParticipantIndex: null
+    };
+
+    let toastTimer = null;
+
+    // --- INITIALIZATION & URL SHARING INGESTION ---
+    window.addEventListener('DOMContentLoaded', async () => {
+      // Setup global modal dismiss on Escape key
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          closeHalfsiesModal();
+          closeAddItemModal();
+        }
+      });
+
+      if (!loadFromURL()) {
+        showEntryScreen();
+      }
+    });
+
+    // --- SCREEN NAVIGATION ---
+    function showEntryScreen() {
+      state.hasReceipt = false;
+      document.getElementById('entryScreen').classList.remove('hidden');
+      document.getElementById('splitScreen').classList.add('hidden');
+      document.getElementById('headerActions').classList.remove('flex');
+      document.getElementById('headerActions').classList.add('hidden');
+    }
+
+    function showSplitScreen() {
+      state.hasReceipt = true;
+      document.getElementById('entryScreen').classList.add('hidden');
+      document.getElementById('splitScreen').classList.remove('hidden');
+      document.getElementById('headerActions').classList.remove('hidden');
+      document.getElementById('headerActions').classList.add('flex');
+      renderItems();
+      updateCalculations();
+    }
+
+    function goToEntryScreen() {
+      if (state.hasReceipt) {
+        if (confirm('Start a new receipt? Your current split can always be restored via its share link.')) {
+          showEntryScreen();
+        }
+      } else {
+        showEntryScreen();
+      }
+    }
+
+    // --- QUICK LOAD SAMPLES ---
+    function loadSampleAndParse(num) {
+      document.getElementById('receiptInput').value = SAMPLES[num];
+      parseAndLaunch();
+    }
+
+    // --- PARSER ENGINE ---
+    function parseReceiptText(raw) {
+      if (!raw || !raw.trim()) return null;
+      let text = raw.trim();
+
+      const subtotalM = text.match(/SUBTOTAL\s*[:$]?\s*(\d+\.\d{2})/i);
+      const subtotal = subtotalM ? parseFloat(subtotalM[1]) : null;
+
+      const taxM = text.match(/(?:TOTAL\s+TAX|TAX)\s*[:$]?\s*(\d+\.\d{2})/i);
+      const tax = taxM ? parseFloat(taxM[1]) : 0.0;
+
+      const totalStar = text.match(/\*{2,}\s*Total\s*[:$]?\s*(\d+\.\d{2})/i);
+      const totalAlt = text.match(/(?:AMOUNT:\s*\$|TOTAL\s+PURCHASE|TOTAL)\s*[:$]?\s*(\d+\.\d{2})/i);
+      const total = totalStar ? parseFloat(totalStar[1]) : (totalAlt ? parseFloat(totalAlt[1]) : null);
+
+      const subtotalPos = text.search(/SUBTOTAL/i);
+      let body = subtotalPos !== -1 ? text.substring(0, subtotalPos) : text;
+
+      const memberM = body.match(/Member\s*(\d{11,12})/i);
+      if (memberM) {
+        body = body.substring(memberM.index + memberM[0].length);
+      } else {
+        body = body.replace(/\b\d{15,}\b/g, ' ');
+      }
+
+      const rebatePattern = /(\d{5,8})\s*\/\s*(\d{4,8})\s*(\d+\.\d{2})-/g;
+      const rebates = [];
+      let rm;
+      while ((rm = rebatePattern.exec(body)) !== null) {
+        rebates.push({ coupon: rm[1], sku: rm[2], discount: parseFloat(rm[3]) });
+      }
+
+      const tokenPattern = /(?:(?<multi>(\d+)\s*@\s*(\d+\.\d{2}))|(?<rebate>(\d{5,8})\s*\/\s*(\d{4,8})\s*(\d+\.\d{2})-)|(?<item>(?:([Ee])\s*)?(\d{4,7})\s*([A-Za-z0-9][A-Za-z0-9\s\.\/\-\&]{1,35}?)\s*(\d+\.\d{2})\s*([YyAaNnEe])))/g;
+
+      const items = [];
+      let pendingMulti = null;
+      let match;
+
+      while ((match = tokenPattern.exec(body)) !== null) {
+        const groups = match.groups || {};
+        if (groups.multi) {
+          pendingMulti = { qty: parseInt(match[2], 10), unitPrice: parseFloat(match[3]) };
+        } else if (groups.rebate) {
+          // Handled in deduction pass
+        } else if (groups.item) {
+          const sku = match[10];
+          const desc = match[11].trim();
+          const price = parseFloat(match[12]);
+          const taxFlag = match[13].toUpperCase();
+          const isTaxable = (taxFlag === 'Y' || taxFlag === 'A');
+
+          if (pendingMulti) {
+            for (let i = 0; i < pendingMulti.qty; i++) {
+              items.push({
+                sku: sku,
+                desc: `${desc} #${i + 1}`,
+                originalPrice: pendingMulti.unitPrice,
+                discount: 0.0,
+                price: pendingMulti.unitPrice,
+                taxable: isTaxable,
+                assignedTo: []
+              });
+            }
+            pendingMulti = null;
+          } else {
+            items.push({
+              sku: sku,
+              desc: desc,
+              originalPrice: price,
+              discount: 0.0,
+              price: price,
+              taxable: isTaxable,
+              assignedTo: []
+            });
+          }
+        }
+      }
+
+      rebates.forEach(r => {
+        let matched = false;
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (items[i].sku === r.sku && items[i].discount === 0) {
+            items[i].discount = r.discount;
+            items[i].price = Math.round((items[i].originalPrice - r.discount) * 100) / 100;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched && items.length > 0) {
+          items[items.length - 1].discount += r.discount;
+          items[items.length - 1].price = Math.round((items[items.length - 1].originalPrice - items[items.length - 1].discount) * 100) / 100;
+        }
+      });
+
+      return { items, subtotal, tax, total };
+    }
+
+    function parseAndLaunch() {
+      const raw = document.getElementById('receiptInput').value;
+      if (!raw.trim()) {
+        showToast('Please paste receipt text');
+        return;
+      }
+
+      const res = parseReceiptText(raw);
+      if (!res || res.items.length === 0) {
+        showToast('Could not find any items');
+        return;
+      }
+
+      state.items = res.items;
+      const calcSub = Math.round(state.items.reduce((s, it) => s + it.price, 0) * 100) / 100;
+      state.totals.subtotal = res.subtotal !== null ? res.subtotal : calcSub;
+      state.totals.tax = res.tax !== null ? res.tax : 0.0;
+      state.totals.total = res.total !== null ? res.total : Math.round((state.totals.subtotal + state.totals.tax) * 100) / 100;
+      state.totals.verified = (Math.abs((calcSub + state.totals.tax) - state.totals.total) <= 0.015);
+
+      showSplitScreen();
+      showToast(`Parsed ${state.items.length} items`);
+    }
+
+    // --- RECALCULATE RECEIPT TOTALS ---
+    function recalculateReceiptTotals() {
+      const itemsNet = Math.round(state.items.reduce((s, it) => s + it.price, 0) * 100) / 100;
+      state.totals.subtotal = itemsNet;
+      state.totals.total = Math.round((itemsNet + state.totals.tax) * 100) / 100;
+      state.totals.verified = Math.abs((itemsNet + state.totals.tax) - state.totals.total) <= 0.015;
+    }
+
+    // --- COMPRESSION HELPERS (deflate-raw via CompressionStream) ---
+    async function compress(str) {
+      const cs = new CompressionStream('deflate-raw');
+      const writer = cs.writable.getWriter();
+      writer.write(new TextEncoder().encode(str));
+      writer.close();
+      const buf = await new Response(cs.readable).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    async function decompress(b64url) {
+      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const ds = new DecompressionStream('deflate-raw');
+      const writer = ds.writable.getWriter();
+      writer.write(bytes);
+      writer.close();
+      return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());
+    }
+
+    // --- STATELESS URL SHARING (v2: compressed, integer-cent payload) ---
+    async function serializeState() {
+      // Participant index map for compact assignedTo arrays
+      const pidToIdx = {};
+      state.participants.forEach((p, i) => { pidToIdx[p.id] = i; });
+
+      const payload = {
+        p: state.participants.map(p => [p.id, p.name]),
+        // Store totals as integer cents to avoid float noise
+        t: [
+          Math.round(state.totals.subtotal * 100),
+          Math.round(state.totals.tax * 100),
+          Math.round(state.totals.total * 100),
+          state.totals.verified ? 1 : 0
+        ],
+        i: state.items.map(it => {
+          const priceC = Math.round(it.price * 100);
+          const origC  = Math.round(it.originalPrice * 100);
+          const discC  = Math.round(it.discount * 100);
+          // Omit originalPrice when it equals price (no rebate) to save bytes
+          const row = [
+            it.sku || '',
+            it.desc,
+            priceC,
+            origC === priceC ? null : origC,
+            discC || null,
+            it.taxable ? 1 : 0,
+            it.assignedTo.map(id => pidToIdx[id] ?? -1).filter(n => n >= 0)
+          ];
+          return row;
+        })
+      };
+      const encoded = await compress(JSON.stringify(payload));
+      return 'v2_' + encoded;
+    }
+
+    async function deserializeState(raw) {
+      try {
+        let data;
+        if (raw.startsWith('v2_')) {
+          // New compressed format
+          const json = await decompress(raw.slice(3));
+          data = JSON.parse(json);
+          if (!data || !data.i || !data.p) return false;
+
+          const seenIds = new Set();
+          state.participants = [];
+          data.p.forEach(([pid, name]) => {
+            if (seenIds.has(pid) || state.participants.length >= 8) return;
+            seenIds.add(pid);
+            const template = ANIMAL_POOL.find(a => a.id === pid) || ANIMAL_POOL[state.participants.length] || ANIMAL_POOL[0];
+            state.participants.push({ ...template, name: name || template.defaultName });
+          });
+
+          while (state.participants.length < 2) {
+            const next = ANIMAL_POOL.find(a => !seenIds.has(a.id));
+            if (!next) break;
+            seenIds.add(next.id);
+            state.participants.push({ ...next, name: next.defaultName });
+          }
+
+          if (data.t) {
+            state.totals = {
+              subtotal: data.t[0] / 100,
+              tax:      data.t[1] / 100,
+              total:    data.t[2] / 100,
+              verified: !!data.t[3]
+            };
+          }
+
+          state.items = data.i.map(([sku, desc, priceC, origC, discC, taxable, assignedIdxs]) => {
+            const price = priceC / 100;
+            const orig  = origC != null ? origC / 100 : price;
+            const disc  = discC != null ? discC / 100 : 0;
+            const assignedTo = (assignedIdxs || [])
+              .map(idx => state.participants[idx]?.id)
+              .filter(Boolean);
+            return { sku: sku || '', desc: desc || '', price, originalPrice: orig, discount: disc,
+                     taxable: taxable === 1, assignedTo };
+          });
+
+        } else {
+          // Legacy v1 format (uncompressed base64 + encodeURIComponent)
+          const bin = atob(decodeURIComponent(raw));
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const json = new TextDecoder().decode(bytes);
+          data = JSON.parse(json);
+          if (!data || !data.i || !data.p) return false;
+
+          const seenIds = new Set();
+          state.participants = [];
+          data.p.forEach(([pid, name]) => {
+            if (seenIds.has(pid) || state.participants.length >= 8) return;
+            seenIds.add(pid);
+            const template = ANIMAL_POOL.find(a => a.id === pid) || ANIMAL_POOL[state.participants.length] || ANIMAL_POOL[0];
+            state.participants.push({ ...template, name: name || template.defaultName });
+          });
+
+          while (state.participants.length < 2) {
+            const next = ANIMAL_POOL.find(a => !seenIds.has(a.id));
+            if (!next) break;
+            seenIds.add(next.id);
+            state.participants.push({ ...next, name: next.defaultName });
+          }
+
+          if (data.t) {
+            state.totals = {
+              subtotal: data.t[0] || 0, tax: data.t[1] || 0,
+              total: data.t[2] || 0, verified: !!data.t[3]
+            };
+          }
+
+          state.items = data.i.map(([sku, desc, price, originalPrice, discount, taxable, assignedTo]) => ({
+            sku: sku || '', desc: desc || '',
+            price: Number(price) || 0,
+            originalPrice: Number(originalPrice) || Number(price) || 0,
+            discount: Number(discount) || 0,
+            taxable: taxable === 1 || taxable === true,
+            assignedTo: Array.isArray(assignedTo) ? assignedTo.filter(id => seenIds.has(id)) : []
+          }));
+        }
+
+        return true;
+      } catch (e) {
+        console.error('Failed to restore shared receipt:', e);
+        return false;
+      }
+    }
+
+    async function shareLink() {
+      const encoded = await serializeState();
+      const url = `${window.location.origin}${window.location.pathname}#share=${encoded}`;
+      history.replaceState(null, '', `#share=${encoded}`);
+
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('🔗 Share link copied to clipboard!');
+      }).catch(() => {
+        prompt('Copy your share link:', url);
+      });
+    }
+
+    async function loadFromURL() {
+      let dataStr = null;
+      if (window.location.hash.startsWith('#share=')) {
+        dataStr = window.location.hash.replace('#share=', '');
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        dataStr = params.get('share') || params.get('s');
+      }
+
+      if (dataStr) {
+        if (await deserializeState(dataStr)) {
+          showSplitScreen();
+          showToast('Restored shared split!');
+          return true;
+        } else {
+          showToast('⚠️ Could not load shared split: link is corrupted.');
+        }
+      }
+      return false;
+    }
+
+    // --- PARTICIPANTS MANAGEMENT WITH INLINE RENAMING ---
+    function renderParticipants(shares = {}) {
+      const container = document.getElementById('participantsList');
+      container.innerHTML = '';
+
+      state.participants.forEach((p, idx) => {
+        const badge = document.createElement('div');
+        const share = shares[p.id];
+        const tabText = share ? `$${share.total.toFixed(2)}` : '$0.00';
+
+        badge.className = `inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl border ${p.bg} ${p.text} ${p.border} text-xs font-semibold shadow-xs transition-all`;
+
+        if (state.editingParticipantIndex === idx) {
+          badge.innerHTML = `
+            <span>${p.emoji}</span>
+            <input type="text" id="inlineRenameInput_${idx}" value="${escapeHtml(p.name)}" 
+              class="w-20 px-1 py-0.5 rounded bg-white text-slate-900 border border-slate-300 font-bold text-xs outline-none focus:ring-1 focus:ring-slate-400">
+            <span class="font-mono font-bold text-[11px] opacity-75">${tabText}</span>
+          `;
+          setTimeout(() => {
+            const input = document.getElementById(`inlineRenameInput_${idx}`);
+            if (input) {
+              input.focus();
+              input.select();
+              input.onblur = () => saveParticipantName(idx, input.value);
+              input.onkeydown = (e) => {
+                if (e.key === 'Enter') {
+                  input.onblur = null;
+                  saveParticipantName(idx, input.value);
+                }
+                if (e.key === 'Escape') {
+                  input.onblur = null;
+                  state.editingParticipantIndex = null;
+                  updateCalculations();
+                }
+              };
+            }
+          }, 10);
+        } else {
+          badge.innerHTML = `
+            <span>${p.emoji}</span>
+            <span onclick="startRenameParticipant(${idx})" class="cursor-pointer hover:underline font-bold" title="Click to rename">${escapeHtml(p.name)}</span>
+            <span class="font-mono font-bold text-[11px] opacity-75 px-1 bg-white/60 rounded">${tabText}</span>
+            ${state.participants.length > 2 ? `
+              <button onclick="removeParticipant(${idx})" class="text-slate-400 hover:text-red-600 ml-0.5 text-[10px]" title="Remove">✕</button>
+            ` : ''}
+          `;
+        }
+        container.appendChild(badge);
+      });
+
+      const addBtn = document.getElementById('addParticipantBtn');
+      addBtn.disabled = (state.participants.length >= 8);
+      addBtn.style.display = state.participants.length >= 8 ? 'none' : 'flex';
+    }
+
+    function startRenameParticipant(idx) {
+      state.editingParticipantIndex = idx;
+      const { shares } = updateCalculations();
+      renderParticipants(shares);
+    }
+
+    function saveParticipantName(idx, newName) {
+      if (newName && newName.trim()) {
+        state.participants[idx].name = newName.trim();
+      }
+      state.editingParticipantIndex = null;
+      renderItems();
+      updateCalculations();
+    }
+
+    function addParticipant() {
+      if (state.participants.length >= 8) return;
+      const existingIds = new Set(state.participants.map(p => p.id));
+      const template = ANIMAL_POOL.find(a => !existingIds.has(a.id));
+      if (!template) return;
+      state.participants.push({ ...template, name: template.defaultName });
+      renderItems();
+      updateCalculations();
+    }
+
+    function removeParticipant(idx) {
+      if (state.participants.length <= 2) return;
+      const pid = state.participants[idx].id;
+      state.participants.splice(idx, 1);
+      state.items.forEach(it => {
+        it.assignedTo = it.assignedTo.filter(id => id !== pid);
+      });
+      renderItems();
+      updateCalculations();
+    }
+
+    // --- ITEM ACTIONS & HALFIES ---
+    function toggleParticipant(itemIdx, pid) {
+      const it = state.items[itemIdx];
+      const i = it.assignedTo.indexOf(pid);
+      if (i === -1) it.assignedTo.push(pid);
+      else it.assignedTo.splice(i, 1);
+      renderItems();
+      updateCalculations();
+    }
+
+    function handleHalfsies(itemIdx) {
+      const it = state.items[itemIdx];
+      if (state.participants.length === 2) {
+        const p1 = state.participants[0].id;
+        const p2 = state.participants[1].id;
+        if (it.assignedTo.length === 2 && it.assignedTo.includes(p1) && it.assignedTo.includes(p2)) {
+          it.assignedTo = [];
+        } else {
+          it.assignedTo = [p1, p2];
+        }
+        renderItems();
+        updateCalculations();
+      } else {
+        openHalfsiesModal(itemIdx);
+      }
+    }
+
+    function openHalfsiesModal(itemIdx) {
+      state.currentHalfsiesIndex = itemIdx;
+      const it = state.items[itemIdx];
+      document.getElementById('halfsiesItemName').innerText = it.desc;
+      document.getElementById('halfsiesItemPrice').innerText = `$${it.price.toFixed(2)}`;
+      document.getElementById('halfsiesPerPerson').innerText = `$${(it.price / 2).toFixed(2)} ea`;
+
+      const list = document.getElementById('halfsiesPickerList');
+      list.innerHTML = '';
+
+      state.participants.forEach(p => {
+        const isChecked = it.assignedTo.includes(p.id);
+        const row = document.createElement('label');
+        row.className = 'flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 cursor-pointer border border-slate-100 text-xs';
+        row.innerHTML = `
+          <span class="flex items-center space-x-2 font-medium">
+            <span>${p.emoji}</span>
+            <span>${escapeHtml(p.name)}</span>
+          </span>
+          <input type="checkbox" name="halfsiesCheck" value="${p.id}" ${isChecked ? 'checked' : ''} onchange="validateHalfsies()" class="w-4 h-4 text-indigo-600 rounded">
+        `;
+        list.appendChild(row);
+      });
+
+      validateHalfsies();
+      const modal = document.getElementById('halfsiesModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function validateHalfsies() {
+      const count = document.querySelectorAll('input[name="halfsiesCheck"]:checked').length;
+      document.getElementById('confirmHalfsiesBtn').disabled = (count !== 2);
+    }
+
+    function applyHalfsiesSelection() {
+      if (state.currentHalfsiesIndex === null) return;
+      const checked = Array.from(document.querySelectorAll('input[name="halfsiesCheck"]:checked')).map(cb => cb.value);
+      if (checked.length === 2) {
+        state.items[state.currentHalfsiesIndex].assignedTo = checked;
+        closeHalfsiesModal();
+        renderItems();
+        updateCalculations();
+      }
+    }
+
+    function closeHalfsiesModal() {
+      const modal = document.getElementById('halfsiesModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      state.currentHalfsiesIndex = null;
+    }
+
+    // --- BULK SPLIT ACTIONS ---
+    function splitAllEvenly() {
+      const allIds = state.participants.map(p => p.id);
+      state.items.forEach(it => it.assignedTo = [...allIds]);
+      renderItems();
+      updateCalculations();
+    }
+
+    function resetAllAssignments() {
+      state.items.forEach(it => it.assignedTo = []);
+      renderItems();
+      updateCalculations();
+    }
+
+    function toggleTax(idx) {
+      state.items[idx].taxable = !state.items[idx].taxable;
+      renderItems();
+      updateCalculations();
+    }
+
+    function deleteItem(idx) {
+      state.items.splice(idx, 1);
+      recalculateReceiptTotals();
+      renderItems();
+      updateCalculations();
+    }
+
+    function updateItemName(idx, newDesc) {
+      if (newDesc && newDesc.trim()) {
+        state.items[idx].desc = newDesc.trim();
+        // Synchronize desktop & mobile input values without redrawing entire DOM to avoid dropping focus
+        const desktopInputs = document.querySelectorAll('#itemsTableBody input[type="text"]');
+        const mobileInputs = document.querySelectorAll('#itemsMobileContainer input[type="text"]');
+        if (desktopInputs[idx]) desktopInputs[idx].value = state.items[idx].desc;
+        if (mobileInputs[idx]) mobileInputs[idx].value = state.items[idx].desc;
+        updateCalculations();
+      }
+    }
+
+    function updateItemPrice(idx, newPriceVal) {
+      const p = parseFloat(newPriceVal);
+      if (!isNaN(p) && p >= 0) {
+        state.items[idx].price = Math.round(p * 100) / 100;
+        recalculateReceiptTotals();
+        // Update both view price inputs without dropping focus
+        const desktopPriceInputs = document.querySelectorAll('#itemsTableBody input[type="number"]');
+        const mobilePriceInputs = document.querySelectorAll('#itemsMobileContainer input[type="number"]');
+        if (desktopPriceInputs[idx]) desktopPriceInputs[idx].value = state.items[idx].price.toFixed(2);
+        if (mobilePriceInputs[idx]) mobilePriceInputs[idx].value = state.items[idx].price.toFixed(2);
+        updateCalculations();
+      } else {
+        renderItems();
+      }
+    }
+
+    // --- MANUAL ADD ITEM ---
+    function openAddItemModal() {
+      document.getElementById('manualDesc').value = '';
+      document.getElementById('manualPrice').value = '';
+      document.getElementById('addItemModal').classList.remove('hidden');
+      document.getElementById('addItemModal').classList.add('flex');
+    }
+
+    function closeAddItemModal() {
+      document.getElementById('addItemModal').classList.add('hidden');
+      document.getElementById('addItemModal').classList.remove('flex');
+    }
+
+    function saveManualItem() {
+      const desc = document.getElementById('manualDesc').value.trim();
+      const price = parseFloat(document.getElementById('manualPrice').value);
+      const tax = document.getElementById('manualTax').value;
+      if (!desc || isNaN(price) || price <= 0) return;
+
+      state.items.push({
+        sku: '',
+        desc,
+        originalPrice: price,
+        discount: 0,
+        price,
+        taxable: (tax === 'Y'),
+        assignedTo: []
+      });
+
+      recalculateReceiptTotals();
+      closeAddItemModal();
+      renderItems();
+      updateCalculations();
+    }
+
+    // --- RENDER ITEMS (DUAL RESPONSIVE: DESKTOP TABLE + MOBILE CARDS) ---
+    function renderItems() {
+      document.getElementById('itemCountDisplay').innerText = state.items.length;
+      const tbody = document.getElementById('itemsTableBody');
+      const mobileContainer = document.getElementById('itemsMobileContainer');
+      tbody.innerHTML = '';
+      mobileContainer.innerHTML = '';
+
+      state.items.forEach((it, idx) => {
+        const isUnassigned = it.assignedTo.length === 0;
+
+        let halfsiesBadge = '';
+        if (it.assignedTo.length === 2) {
+          halfsiesBadge = `<span class="ml-1 text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded font-mono">½ $${(it.price / 2).toFixed(2)}</span>`;
+        }
+
+        // 1. Desktop Table Row
+        const tr = document.createElement('tr');
+        tr.className = `hover:bg-slate-50/80 transition-colors ${isUnassigned ? 'border-l-4 border-l-amber-400 bg-amber-50/20' : 'border-l-4 border-l-transparent'}`;
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-4 text-center text-slate-400 font-mono text-[11px]">${idx + 1}</td>
+          <td class="py-2.5 px-4">
+            <div class="flex items-center space-x-1">
+              <input type="text" value="${escapeHtml(it.desc)}" onchange="updateItemName(${idx}, this.value)" 
+                class="font-medium text-slate-900 bg-transparent hover:bg-white focus:bg-white px-1.5 py-0.5 rounded border border-transparent hover:border-slate-300 focus:border-blue-500 text-xs outline-none w-full">
+              ${halfsiesBadge}
+            </div>
+            ${it.sku ? `<div class="text-[10px] font-mono text-slate-400 px-1.5">#${escapeHtml(it.sku)}</div>` : ''}
+          </td>
+          <td class="py-2.5 px-4 text-right">
+            <div class="flex items-center justify-end font-mono">
+              <span class="text-slate-400 text-xs">$</span>
+              <input type="number" step="0.01" value="${it.price.toFixed(2)}" onchange="updateItemPrice(${idx}, this.value)"
+                class="w-16 text-right font-bold text-slate-900 bg-transparent hover:bg-white focus:bg-white px-1 py-0.5 rounded border border-transparent hover:border-slate-300 focus:border-blue-500 text-xs outline-none">
+            </div>
+            ${it.discount > 0 ? `<div class="text-[10px] text-emerald-600 font-normal">-$${it.discount.toFixed(2)}</div>` : ''}
+          </td>
+          <td class="py-2.5 px-4 text-center">
+            <button onclick="toggleTax(${idx})" class="px-2 py-0.5 rounded text-[10px] font-bold transition-all ${it.taxable ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-500'}" title="Toggle taxable">
+              ${it.taxable ? 'Tax' : 'Free'}
+            </button>
+          </td>
+          <td class="py-2.5 px-4">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${state.participants.map(p => {
+                const isSelected = it.assignedTo.includes(p.id);
+                return `
+                  <button onclick="toggleParticipant(${idx}, '${p.id}')" title="${escapeHtml(p.name)}"
+                    class="w-8 h-8 rounded-xl flex items-center justify-center text-sm border transition-all ${isSelected ? `${p.bg} ${p.border} scale-105 font-bold shadow-xs` : 'bg-slate-50/60 border-slate-200 text-slate-400 hover:text-slate-800 hover:bg-white'}">
+                    ${p.emoji}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </td>
+          <td class="py-2.5 px-4 text-center">
+            <button onclick="handleHalfsies(${idx})" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${it.assignedTo.length === 2 ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}">
+              ½ Halfsies
+            </button>
+          </td>
+          <td class="py-2.5 px-4 text-center">
+            <button onclick="deleteItem(${idx})" class="text-slate-300 hover:text-red-500 transition-all text-xs" title="Delete">✕</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+
+        // 2. Mobile Responsive Card (< md)
+        const card = document.createElement('div');
+        card.className = `p-3.5 bg-white rounded-xl border border-slate-200 space-y-2.5 transition-all ${isUnassigned ? 'border-l-4 border-l-amber-400 bg-amber-50/10' : ''}`;
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex-1">
+              <input type="text" value="${escapeHtml(it.desc)}" onchange="updateItemName(${idx}, this.value)" 
+                class="font-bold text-slate-900 bg-transparent text-sm w-full outline-none focus:ring-1 focus:ring-blue-400 rounded">
+              <div class="flex items-center space-x-2 text-[10px] font-mono text-slate-400 mt-0.5">
+                ${it.sku ? `<span>#${escapeHtml(it.sku)}</span>` : ''}
+                ${halfsiesBadge}
+                ${it.discount > 0 ? `<span class="text-emerald-600 font-semibold">-$${it.discount.toFixed(2)}</span>` : ''}
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="flex items-center justify-end font-mono">
+                <span class="text-slate-400 text-xs">$</span>
+                <input type="number" step="0.01" value="${it.price.toFixed(2)}" onchange="updateItemPrice(${idx}, this.value)"
+                  class="w-14 text-right font-bold text-slate-900 bg-transparent font-mono text-sm outline-none">
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${state.participants.map(p => {
+                const isSelected = it.assignedTo.includes(p.id);
+                return `
+                  <button onclick="toggleParticipant(${idx}, '${p.id}')" title="${escapeHtml(p.name)}"
+                    class="w-9 h-9 rounded-xl flex items-center justify-center text-base border transition-all ${isSelected ? `${p.bg} ${p.border} scale-105 font-bold shadow-xs` : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-white'}">
+                    ${p.emoji}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="flex items-center space-x-1.5">
+              <button onclick="toggleTax(${idx})" class="px-2 py-1 rounded text-[11px] font-bold ${it.taxable ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'}">
+                ${it.taxable ? 'Tax' : 'Free'}
+              </button>
+              <button onclick="handleHalfsies(${idx})" class="px-2.5 py-1 rounded-lg text-[11px] font-bold ${it.assignedTo.length === 2 ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700'}">
+                ½
+              </button>
+              <button onclick="deleteItem(${idx})" class="text-slate-300 hover:text-red-500 p-1 text-xs">✕</button>
+            </div>
+          </div>
+        `;
+        mobileContainer.appendChild(card);
+      });
+    }
+
+    // --- EXACT-CENT CALCULATION & PENNY RECONCILIATION ENGINE ---
+    function updateCalculations() {
+      const taxableNet = state.items.filter(it => it.taxable).reduce((s, it) => s + it.price, 0);
+      const effectiveTaxRate = taxableNet > 0 ? (state.totals.tax / taxableNet) : 0;
+
+      const shares = {};
+      state.participants.forEach(p => {
+        shares[p.id] = { subtotal: 0, tax: 0, total: 0, items: [] };
+      });
+
+      let totalAllocated = 0;
+      let unassignedCount = 0;
+
+      state.items.forEach(it => {
+        const count = it.assignedTo.length;
+        if (count === 0) {
+          unassignedCount++;
+          return;
+        }
+
+        totalAllocated += it.price;
+
+        // Convert base price to integer cents to guarantee penny reconciliation
+        const itemCents = Math.round(it.price * 100);
+        const baseCentsEach = Math.floor(itemCents / count);
+        const remainderCents = itemCents % count;
+
+        // Convert tax share to integer cents
+        const totalTaxCents = Math.round((it.taxable ? it.price * effectiveTaxRate : 0) * 100);
+        const taxCentsEach = Math.floor(totalTaxCents / count);
+        const remainderTaxCents = totalTaxCents % count;
+
+        it.assignedTo.forEach((pid, idx) => {
+          if (!shares[pid]) return;
+          // Distribute remainder cents deterministically to the first N assignees
+          const sharePrice = (baseCentsEach + (idx < remainderCents ? 1 : 0)) / 100;
+          const shareTax = (taxCentsEach + (idx < remainderTaxCents ? 1 : 0)) / 100;
+
+          shares[pid].subtotal += sharePrice;
+          shares[pid].tax += shareTax;
+          shares[pid].items.push({
+            desc: it.desc,
+            price: sharePrice,
+            tax: shareTax,
+            isHalfsies: count === 2,
+            isSolo: count === 1
+          });
+        });
+      });
+
+      Object.values(shares).forEach(s => {
+        s.subtotal = Math.round(s.subtotal * 100) / 100;
+        s.tax = Math.round(s.tax * 100) / 100;
+        s.total = Math.round((s.subtotal + s.tax) * 100) / 100;
+      });
+
+      // Update Top Status Bar & Participant Running Tabs
+      renderStatusBar(totalAllocated, unassignedCount);
+      renderParticipants(shares);
+
+      // Render Participant Cards
+      renderCards(shares);
+
+      return { shares, effectiveTaxRate };
+    }
+
+    function renderStatusBar(totalAllocated, unassignedCount) {
+      const itemsNet = state.items.reduce((s, it) => s + it.price, 0);
+      const badge = document.getElementById('statusBadge');
+      
+      if (state.totals.verified) {
+        badge.className = 'flex items-center space-x-1 font-bold px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800';
+        badge.innerHTML = `<span>✓</span><span>Verified</span>`;
+      } else {
+        badge.className = 'flex items-center space-x-1 font-bold px-2 py-0.5 rounded-lg bg-amber-100 text-amber-800';
+        badge.innerHTML = `<span>Notice</span>`;
+      }
+
+      document.getElementById('summaryTotalText').innerText = `$${state.totals.total.toFixed(2)}`;
+      document.getElementById('summaryTaxText').innerText = `$${state.totals.tax.toFixed(2)}`;
+
+      document.getElementById('allocationAmount').innerText = `$${totalAllocated.toFixed(2)} / $${itemsNet.toFixed(2)}`;
+      
+      const allocBadge = document.getElementById('allocationBadge');
+      allocBadge.innerText = unassignedCount > 0 ? `${unassignedCount} unassigned` : '100% Assigned';
+      allocBadge.className = `px-2 py-0.5 rounded-full text-[10px] font-bold ${unassignedCount > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`;
+    }
+
+    function renderCards(shares) {
+      const grid = document.getElementById('participantCardsGrid');
+      grid.innerHTML = '';
+
+      state.participants.forEach(p => {
+        const s = shares[p.id];
+        const card = document.createElement('div');
+        card.className = `rounded-2xl border ${p.border} bg-white shadow-xs overflow-hidden flex flex-col`;
+
+        card.innerHTML = `
+          <div class="p-3.5 ${p.bg} border-b ${p.border} flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="text-xl">${p.emoji}</span>
+              <span class="font-bold text-xs sm:text-sm text-slate-900 truncate">${escapeHtml(p.name)}</span>
+            </div>
+            <div class="font-mono font-black text-base text-slate-950">$${s.total.toFixed(2)}</div>
+          </div>
+
+          <div class="p-3 flex-1 space-y-1.5 max-h-48 overflow-y-auto divide-y divide-slate-50 text-xs">
+            ${s.items.length === 0 ? `
+              <div class="py-4 text-center text-slate-300 text-xs italic">No items claimed</div>
+            ` : s.items.map(it => `
+              <div class="pt-1.5 first:pt-0 flex justify-between gap-1 text-[11px]">
+                <div class="truncate text-slate-700">
+                  ${escapeHtml(it.desc)}
+                  ${it.isHalfsies ? '<span class="text-purple-600 font-bold ml-0.5 font-mono">½</span>' : ''}
+                </div>
+                <div class="font-mono font-bold text-slate-900 shrink-0">$${it.price.toFixed(2)}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="p-3 bg-slate-50 border-t border-slate-100 text-[11px] flex items-center justify-between text-slate-500 font-mono">
+            <span>Sub: $${s.subtotal.toFixed(2)}</span>
+            <span>Tax: $${s.tax.toFixed(2)}</span>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // --- COPY SUMMARY EXPORT ---
+    function copySplitSummary() {
+      const { shares } = updateCalculations();
+      let text = `🛒 Costco Split ($${state.totals.total.toFixed(2)})\n`;
+      text += `------------------------------------\n`;
+
+      state.participants.forEach(p => {
+        const s = shares[p.id];
+        text += `${p.emoji} ${p.name}: $${s.total.toFixed(2)}\n`;
+        s.items.forEach(it => {
+          text += `  • ${it.desc}${it.isHalfsies ? ' (½)' : ''}: $${it.price.toFixed(2)}${it.tax > 0 ? ` +$${it.tax.toFixed(2)} tax` : ''}\n`;
+        });
+        text += `  (Items: $${s.subtotal.toFixed(2)} | Tax: $${s.tax.toFixed(2)})\n\n`;
+      });
+
+      const unassigned = state.items.filter(it => it.assignedTo.length === 0);
+      if (unassigned.length > 0) {
+        text += `⚠️ Unassigned (${unassigned.length}):\n`;
+        unassigned.forEach(it => text += `  • ${it.desc}: $${it.price.toFixed(2)}\n`);
+        text += `\n`;
+      }
+
+      text += `Split with CostcoSplitter ✨`;
+
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('📋 Summary copied for Venmo/Messages!');
+      }).catch(() => {
+        prompt('Copy split summary:', text);
+      });
+    }
+
+    // --- TOAST & UTILITIES ---
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toastMessage').innerText = msg;
+      toast.classList.remove('hidden');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.add('hidden'), 3500);
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>
